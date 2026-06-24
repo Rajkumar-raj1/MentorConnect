@@ -1,23 +1,28 @@
-import { Outlet } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
 
 import Navbar from "../components/Navbar/Navbar";
 import Footer from "../components/Footer";
 
 const MainLayout = () => {
+  const location = useLocation();
+
+  const hideFooter = location.pathname.startsWith("/chat");
+
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">
-      {/* Navbar */}
       <Navbar />
 
-      {/* Main Content */}
       <main className="flex-1 w-full">
-        <div className="max-w-7xl mx-auto px-4 py-6 sm:px-6 lg:px-8">
+        <div
+          className={`max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 ${
+            hideFooter ? "py-0" : "py-6"
+          }`}
+        >
           <Outlet />
         </div>
       </main>
 
-      {/* Footer */}
-      <Footer />
+      {!hideFooter && <Footer />}
     </div>
   );
 };

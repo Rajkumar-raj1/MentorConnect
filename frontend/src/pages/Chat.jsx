@@ -154,7 +154,7 @@ const Chat = () => {
   }
 
   return (
-    <div className="h-[calc(100vh-140px)]">
+    <div className="h-[calc(100vh-80px)] min-h-[600px]">
       <div className="grid md:grid-cols-3 h-full gap-5">
         <ConversationList
           conversations={conversations}
