@@ -6,7 +6,10 @@ import Footer from "../components/Footer";
 const MainLayout = () => {
   const location = useLocation();
 
-  const hideFooter = location.pathname.startsWith("/chat");
+  const hideFooter =
+    location.pathname.startsWith("/chat") ||
+    location.pathname.startsWith("/groups") ||
+    location.pathname.startsWith("/notifications");
 
   return (
     <div className="min-h-screen flex flex-col bg-gray-50">

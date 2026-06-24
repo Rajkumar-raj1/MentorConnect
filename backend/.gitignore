@@ -31,10 +31,6 @@ coverage/
 dist/
 build/
 
-# Temporary Files
-tmp/
-temp/
-public/temp/
 
 # OS Files
 .DS_Store
