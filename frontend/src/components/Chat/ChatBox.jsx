@@ -15,12 +15,25 @@ const ChatBox = ({
   onStopTyping,
 }) => {
   const bottomRef = useRef(null);
+  const messagesContainerRef = useRef(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
-      behavior: "smooth",
-    });
-  }, [messages, typingUser]);
+    const container = messagesContainerRef.current;
+
+    if (!container) return;
+
+    const isNearBottom =
+      container.scrollHeight -
+        container.scrollTop -
+        container.clientHeight <
+      150;
+
+    if (isNearBottom) {
+      bottomRef.current?.scrollIntoView({
+        behavior: "smooth",
+      });
+    }
+  }, [messages]);
 
   if (!selectedConversation) {
     return <EmptyChat />;
@@ -28,11 +41,12 @@ const ChatBox = ({
 
   return (
     <div className="flex flex-col h-full bg-white rounded-2xl shadow-md overflow-hidden">
-      {/* Header */}
       <ChatHeader conversation={selectedConversation} />
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50">
+      <div
+        ref={messagesContainerRef}
+        className="flex-1 overflow-y-auto px-4 py-4 bg-gray-50"
+      >
         {messages.length === 0 ? (
           <div className="h-full flex items-center justify-center text-gray-500">
             Start the conversation 👋
@@ -43,28 +57,23 @@ const ChatBox = ({
               <ChatMessage
                 key={message._id}
                 message={message}
-                isOwnMessage={
-                  message.sender?._id === currentUser?._id
-                }
+                isOwnMessage={message.sender?._id === currentUser?._id}
               />
             ))}
 
-            {/* Typing Indicator */}
-            {typingUser &&
-              typingUser !== currentUser?._id && (
-                <div className="flex justify-start">
-                  <div className="bg-gray-200 px-4 py-2 rounded-2xl text-sm text-gray-600 animate-pulse">
-                    Typing...
-                  </div>
+            {typingUser && typingUser !== currentUser?._id && (
+              <div className="flex justify-start">
+                <div className="bg-gray-200 px-4 py-2 rounded-2xl text-sm text-gray-600 animate-pulse">
+                  Typing...
                 </div>
-              )}
+              </div>
+            )}
 
             <div ref={bottomRef} />
           </div>
         )}
       </div>
 
-      {/* Input */}
       <ChatInput
         onSendMessage={onSendMessage}
         onTyping={onTyping}
