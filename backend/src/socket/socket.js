@@ -3,12 +3,14 @@ import socketHandlers from "./socketHandlers.js";
 
 let io;
 
+const allowedOrigins = process.env.CORS_ORIGIN?.split(",") || [];
+
 const initializeSocket = (server) => {
   io = new Server(server, {
     cors: {
-      origin: process.env.CORS_ORIGIN,
+      origin: allowedOrigins,
       credentials: true,
-      methods: ["GET", "POST"],
+      methods: ["GET", "POST", "PUT", "PATCH", "DELETE"],
     },
   });
 
