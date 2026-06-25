@@ -1,9 +1,11 @@
 import { Conversation } from "../models/conversation.model.js";
 import { Message } from "../models/message.model.js";
+import { Notification } from "../models/notification.model.js";
+
 import asyncHandler from "../utils/asyncHandler.js";
 import ApiError from "../utils/ApiError.js";
 import ApiResponse from "../utils/ApiResponse.js";
-import { Notification } from "../models/notification.model.js";
+
 // Create or get existing conversation
 const createOrGetConversation = asyncHandler(async (req, res) => {
   const { receiverId } = req.body;
@@ -34,7 +36,7 @@ const createOrGetConversation = asyncHandler(async (req, res) => {
     .json(new ApiResponse(200, conversation, "Conversation fetched successfully"));
 });
 
-// Get logged-in user's conversations
+// Get logged-in user's conversations with unread count
 const getMyConversations = asyncHandler(async (req, res) => {
   const conversations = await Conversation.find({
     participants: req.user._id,
@@ -49,9 +51,30 @@ const getMyConversations = asyncHandler(async (req, res) => {
     })
     .sort({ updatedAt: -1 });
 
+  const conversationsWithUnread = await Promise.all(
+    conversations.map(async (conversation) => {
+      const unreadCount = await Message.countDocuments({
+        conversation: conversation._id,
+        receiver: req.user._id,
+        seen: false,
+      });
+
+      return {
+        ...conversation.toObject(),
+        unreadCount,
+      };
+    })
+  );
+
   return res
     .status(200)
-    .json(new ApiResponse(200, conversations, "Conversations fetched successfully"));
+    .json(
+      new ApiResponse(
+        200,
+        conversationsWithUnread,
+        "Conversations fetched successfully"
+      )
+    );
 });
 
 // Send message
@@ -69,11 +92,15 @@ const sendMessage = asyncHandler(async (req, res) => {
     throw new ApiError(404, "Conversation not found");
   }
 
-  const isParticipant = conversation.participants.some(
+  const isSenderParticipant = conversation.participants.some(
     (participantId) => participantId.toString() === req.user._id.toString()
   );
 
-  if (!isParticipant) {
+  const isReceiverParticipant = conversation.participants.some(
+    (participantId) => participantId.toString() === receiverId.toString()
+  );
+
+  if (!isSenderParticipant || !isReceiverParticipant) {
     throw new ApiError(403, "You are not allowed to send message in this conversation");
   }
 
@@ -91,13 +118,14 @@ const sendMessage = asyncHandler(async (req, res) => {
     .populate("sender", "fullName avatar role")
     .populate("receiver", "fullName avatar role");
 
-    await Notification.create({
-  user: receiverId,
-  title: "New Message",
-  message: `${req.user.fullName} sent you a message`,
-  type: "message",
-  relatedId: conversationId,
-});
+  await Notification.create({
+    user: receiverId,
+    title: "New Message",
+    message: `${req.user.fullName} sent you a message`,
+    type: "message",
+    relatedId: conversationId,
+  });
+
   return res
     .status(201)
     .json(new ApiResponse(201, populatedMessage, "Message sent successfully"));
@@ -134,6 +162,20 @@ const getMessages = asyncHandler(async (req, res) => {
 // Mark messages as seen
 const markMessagesAsSeen = asyncHandler(async (req, res) => {
   const { conversationId } = req.params;
+
+  const conversation = await Conversation.findById(conversationId);
+
+  if (!conversation) {
+    throw new ApiError(404, "Conversation not found");
+  }
+
+  const isParticipant = conversation.participants.some(
+    (participantId) => participantId.toString() === req.user._id.toString()
+  );
+
+  if (!isParticipant) {
+    throw new ApiError(403, "You are not allowed to update this conversation");
+  }
 
   await Message.updateMany(
     {
