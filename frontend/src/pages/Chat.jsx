@@ -76,9 +76,42 @@ const Chat = () => {
   useEffect(() => {
     if (!socket) return;
 
-    socket.on("receiveMessage", (message) => {
-      setMessages((prev) => [...prev, message]);
+   socket.on("receiveMessage", (message) => {
+  const messageConversationId =
+    message?.conversation?._id || message?.conversation;
+
+  // 1. If current open conversation, add message
+  if (selectedConversation?._id === messageConversationId) {
+    setMessages((prev) => {
+      const alreadyExists = prev.some((msg) => msg._id === message._id);
+      if (alreadyExists) return prev;
+      return [...prev, message];
     });
+
+    markMessagesAsSeen(messageConversationId);
+  }
+
+  // 2. Always update conversation list
+  setConversations((prev) =>
+    prev.map((conversation) => {
+      if (conversation._id !== messageConversationId) {
+        return conversation;
+      }
+
+      const isOtherConversation =
+        selectedConversation?._id !== messageConversationId;
+
+      return {
+        ...conversation,
+        lastMessage: message,
+        unreadCount: isOtherConversation
+          ? (conversation.unreadCount || 0) + 1
+          : 0,
+        updatedAt: message.createdAt,
+      };
+    })
+  );
+});
 
     socket.on("typing", ({ userId }) => {
       setTypingUser(userId);
