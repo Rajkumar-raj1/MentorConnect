@@ -1,8 +1,8 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import toast from "react-hot-toast";
 
 import useAuth from "../hooks/useAuth";
-import  useSocket  from "../hooks/useSocket";
+import useSocket from "../hooks/useSocket";
 
 import ConversationList from "../components/Chat/ConversationList";
 import ChatBox from "../components/Chat/ChatBox";
@@ -19,156 +19,198 @@ const Chat = () => {
   const { user } = useAuth();
   const { socket } = useSocket();
 
+  const selectedConversationRef = useRef(null);
+
   const [conversations, setConversations] = useState([]);
   const [selectedConversation, setSelectedConversation] = useState(null);
-
   const [messages, setMessages] = useState([]);
-
   const [typingUser, setTypingUser] = useState(null);
 
   const [loading, setLoading] = useState(true);
   const [messageLoading, setMessageLoading] = useState(false);
 
-  // ---------------- Fetch Conversations ----------------
+  useEffect(() => {
+    selectedConversationRef.current = selectedConversation;
+  }, [selectedConversation]);
 
-  const fetchConversations = async () => {
+  const fetchConversations = async (showLoader = true) => {
     try {
-      setLoading(true);
+      if (showLoader) setLoading(true);
 
       const response = await getMyConversations();
-
       setConversations(response.data || []);
     } catch (error) {
-      toast.error(error.response?.data?.message);
+      toast.error(error.response?.data?.message || "Failed to fetch conversations");
     } finally {
-      setLoading(false);
+      if (showLoader) setLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchConversations();
+    fetchConversations(true);
   }, []);
-
-  // ---------------- Select Conversation ----------------
 
   const handleSelectConversation = async (conversation) => {
     try {
       setSelectedConversation(conversation);
 
+      setConversations((prev) =>
+        prev.map((conv) =>
+          conv._id === conversation._id
+            ? { ...conv, unreadCount: 0 }
+            : conv
+        )
+      );
+
       setMessageLoading(true);
 
-      const response = await getMessages(conversation._id);
+      socket?.emit("joinConversation", conversation._id);
 
+      const response = await getMessages(conversation._id);
       setMessages(response.data || []);
 
       await markMessagesAsSeen(conversation._id);
-
-      socket?.emit("joinConversation", conversation._id);
     } catch (error) {
-      toast.error(error.response?.data?.message);
+      toast.error(error.response?.data?.message || "Failed to load messages");
     } finally {
       setMessageLoading(false);
     }
   };
 
-  // ---------------- Socket Events ----------------
-
   useEffect(() => {
     if (!socket) return;
 
-   socket.on("receiveMessage", (message) => {
-  const messageConversationId =
-    message?.conversation?._id || message?.conversation;
+    const handleReceiveMessage = (message) => {
+      const messageConversationId =
+        message?.conversation?._id || message?.conversation;
 
-  // 1. If current open conversation, add message
-  if (selectedConversation?._id === messageConversationId) {
-    setMessages((prev) => {
-      const alreadyExists = prev.some((msg) => msg._id === message._id);
-      if (alreadyExists) return prev;
-      return [...prev, message];
-    });
+      const currentSelected = selectedConversationRef.current;
 
-    markMessagesAsSeen(messageConversationId);
-  }
+      if (currentSelected?._id === messageConversationId) {
+        setMessages((prev) => {
+          const alreadyExists = prev.some((msg) => msg._id === message._id);
+          if (alreadyExists) return prev;
+          return [...prev, message];
+        });
 
-  // 2. Always update conversation list
-  setConversations((prev) =>
-    prev.map((conversation) => {
-      if (conversation._id !== messageConversationId) {
-        return conversation;
+        markMessagesAsSeen(messageConversationId);
       }
 
-      const isOtherConversation =
-        selectedConversation?._id !== messageConversationId;
+      setConversations((prev) => {
+        const exists = prev.some(
+          (conversation) => conversation._id === messageConversationId
+        );
 
-      return {
-        ...conversation,
-        lastMessage: message,
-        unreadCount: isOtherConversation
-          ? (conversation.unreadCount || 0) + 1
-          : 0,
-        updatedAt: message.createdAt,
-      };
-    })
-  );
-});
+        if (!exists) {
+          fetchConversations(false);
+          return prev;
+        }
 
-    socket.on("typing", ({ userId }) => {
+        return prev
+          .map((conversation) => {
+            if (conversation._id !== messageConversationId) {
+              return conversation;
+            }
+
+            const isOtherConversation =
+              currentSelected?._id !== messageConversationId;
+
+            return {
+              ...conversation,
+              lastMessage: message,
+              unreadCount: isOtherConversation
+                ? (conversation.unreadCount || 0) + 1
+                : 0,
+              updatedAt: message.createdAt,
+            };
+          })
+          .sort(
+            (a, b) =>
+              new Date(b.updatedAt).getTime() -
+              new Date(a.updatedAt).getTime()
+          );
+      });
+    };
+
+    const handleTyping = ({ userId }) => {
       setTypingUser(userId);
-    });
+    };
 
-    socket.on("stopTyping", () => {
+    const handleStopTyping = () => {
       setTypingUser(null);
-    });
+    };
 
-    socket.on("messageSeen", ({ messageId }) => {
+    const handleMessageSeen = ({ messageId }) => {
       setMessages((prev) =>
         prev.map((msg) =>
           msg._id === messageId ? { ...msg, seen: true } : msg
         )
       );
-    });
+    };
+
+    socket.on("receiveMessage", handleReceiveMessage);
+    socket.on("typing", handleTyping);
+    socket.on("stopTyping", handleStopTyping);
+    socket.on("messageSeen", handleMessageSeen);
 
     return () => {
-      socket.off("receiveMessage");
-      socket.off("typing");
-      socket.off("stopTyping");
-      socket.off("messageSeen");
+      socket.off("receiveMessage", handleReceiveMessage);
+      socket.off("typing", handleTyping);
+      socket.off("stopTyping", handleStopTyping);
+      socket.off("messageSeen", handleMessageSeen);
     };
   }, [socket]);
 
-  // ---------------- Send Message ----------------
-
   const handleSendMessage = async (text) => {
-  if (!selectedConversation) return;
+    if (!selectedConversation) return;
 
-  const receiver = selectedConversation.participants.find(
-    (participant) => participant._id !== user._id
-  );
-
-  try {
-    const response = await sendMessage(
-      selectedConversation._id,
-      receiver._id,
-      text
+    const receiver = selectedConversation.participants.find(
+      (participant) => participant._id !== user._id
     );
 
-    socket?.emit("sendMessage", {
-      conversationId: selectedConversation._id,
-      message: response.data,
-    });
+    if (!receiver) {
+      toast.error("Receiver not found");
+      return;
+    }
 
-    // Do not manually add message here
-    // Socket will add it through receiveMessage
-    fetchConversations();
-  } catch (error) {
-    toast.error(error.response?.data?.message || "Failed to send message");
-  }
-};
+    try {
+      const response = await sendMessage(
+        selectedConversation._id,
+        receiver._id,
+        text
+      );
 
-  // ---------------- Typing ----------------
+      socket?.emit("sendMessage", {
+        conversationId: selectedConversation._id,
+        message: response.data,
+      });
+
+      setConversations((prev) =>
+        prev
+          .map((conversation) =>
+            conversation._id === selectedConversation._id
+              ? {
+                  ...conversation,
+                  lastMessage: response.data,
+                  unreadCount: 0,
+                  updatedAt: response.data.createdAt,
+                }
+              : conversation
+          )
+          .sort(
+            (a, b) =>
+              new Date(b.updatedAt).getTime() -
+              new Date(a.updatedAt).getTime()
+          )
+      );
+    } catch (error) {
+      toast.error(error.response?.data?.message || "Failed to send message");
+    }
+  };
 
   const handleTyping = () => {
+    if (!selectedConversation) return;
+
     socket?.emit("typing", {
       conversationId: selectedConversation._id,
       userId: user._id,
@@ -176,6 +218,8 @@ const Chat = () => {
   };
 
   const handleStopTyping = () => {
+    if (!selectedConversation) return;
+
     socket?.emit("stopTyping", {
       conversationId: selectedConversation._id,
       userId: user._id,
